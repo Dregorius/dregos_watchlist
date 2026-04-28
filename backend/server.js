@@ -8,7 +8,6 @@ const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
-// ─── Security: Fail hard on missing JWT_SECRET ────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
   console.error('FATAL: JWT_SECRET fehlt oder zu kurz (min. 32 Zeichen). In .env setzen!');
@@ -86,10 +85,6 @@ db.exec(`
   INSERT OR IGNORE INTO invites (code, created_by) VALUES ('SETUP-ADMIN', NULL);
 `);
 
-// ─── Timing-Attack Prevention: Dummy bcrypt hash ──────────────────────────────
-// Without this, an attacker can tell whether an email exists by measuring
-// response time: "no user found" returns immediately, "wrong password"
-// takes ~300ms for bcrypt. We always run bcrypt regardless.
 let DUMMY_HASH = '$2b$12$placeholderXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.';
 bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12).then(h => { DUMMY_HASH = h; });
 
@@ -599,7 +594,6 @@ app.get('*', (req, res) => {
 });
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message);
   res.status(500).json({ error: 'Interner Serverfehler' });
