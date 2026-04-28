@@ -1,6 +1,7 @@
-# Watchlist
+# Drego`s Watchlist
 
-Private watchlist app for movies, series and games.
+Private selfhosted watchlist app for movies, series and games.
+Use solo or share between friends.
 
 ## Features
 
