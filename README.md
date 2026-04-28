@@ -14,7 +14,7 @@ Use solo or share between friends.
 ## Requirements
 
 - Docker and Docker Compose
-- nginx with certbot on the server
+- nginx with certbot on server (if hosted on public server)
 - TMDB API key: https://www.themoviedb.org/settings/api
 - RAWG API key (optional): https://rawg.io/apidocs
 
