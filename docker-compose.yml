@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  watchlist:
+    build: .
+    container_name: watchlist-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
