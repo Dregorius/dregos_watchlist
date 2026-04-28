@@ -10,7 +10,6 @@ Use solo or share between friends.
 - Game metadata via RAWG API (free, optional)
 - Private and shared lists
 - Personal ratings and status tracking
-- Dark, responsive UI
 
 ## Requirements
 
