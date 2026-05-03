@@ -1,16 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
 
-const TYPES = [
+const TYPES_MEDIA = [
   { value: '', label: 'Alle' },
   { value: 'movie', label: '🎬 Filme' },
   { value: 'series', label: '📺 Serien' },
+];
+const TYPES_GAME = [
   { value: 'game', label: '🎮 Games' },
 ];
 
-export default function SearchModal({ listId, onAdd, onClose }) {
+export default function SearchModal({ listId, listType, onAdd, onClose }) {
   const [query, setQuery] = useState('');
-  const [type, setType] = useState('');
+  const isGameList = listType === 'game';
+  const TYPES = isGameList ? TYPES_GAME : TYPES_MEDIA;
+  const [type, setType] = useState(isGameList ? 'game' : '');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(null);
@@ -48,6 +52,7 @@ export default function SearchModal({ listId, onAdd, onClose }) {
         media_id: item.id,
         media_type: item.media_type,
         title: item.title,
+        original_title: item.original_title || item.title,
         year: item.year,
         poster_url: item.poster_url,
         backdrop_url: item.backdrop_url,

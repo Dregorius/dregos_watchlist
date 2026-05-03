@@ -8,6 +8,7 @@ const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
+// ─── Security: Fail hard on missing JWT_SECRET ────────────────────────────────
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET || JWT_SECRET.length < 32) {
   console.error('FATAL: JWT_SECRET fehlt oder zu kurz (min. 32 Zeichen). In .env setzen!');
@@ -15,6 +16,7 @@ if (!JWT_SECRET || JWT_SECRET.length < 32) {
 }
 
 const app = express();
+app.set('trust proxy', 1); // Trust nginx proxy for correct IP in rate limiting
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || './data/watchlist.db';
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
@@ -83,8 +85,21 @@ db.exec(`
     added_at TEXT DEFAULT (datetime('now'))
   );
   INSERT OR IGNORE INTO invites (code, created_by) VALUES ('SETUP-ADMIN', NULL);
-`);
 
+`)
+
+// Migrations (safe, run on every start)
+try { db.exec('ALTER TABLE list_items ADD COLUMN original_title TEXT'); } catch (_) {}
+try { db.exec('ALTER TABLE lists ADD COLUMN category TEXT DEFAULT ""'); } catch (_) {}
+try { db.exec('ALTER TABLE lists ADD COLUMN sort_order INTEGER DEFAULT 0'); } catch (_) {}
+try { db.exec('ALTER TABLE users ADD COLUMN letterboxd_username TEXT DEFAULT ""'); } catch (_) {}
+try { db.exec('ALTER TABLE users ADD COLUMN mal_username TEXT DEFAULT ""'); } catch (_) {}
+try { db.exec('ALTER TABLE users ADD COLUMN imdb_username TEXT DEFAULT ""'); } catch (_) {}
+
+// ─── Timing-Attack Prevention: Dummy bcrypt hash ──────────────────────────────
+// Without this, an attacker can tell whether an email exists by measuring
+// response time: "no user found" returns immediately, "wrong password"
+// takes ~300ms for bcrypt. We always run bcrypt regardless.
 let DUMMY_HASH = '$2b$12$placeholderXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.';
 bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12).then(h => { DUMMY_HASH = h; });
 
@@ -97,7 +112,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https://image.tmdb.org", "https://media.rawg.io",
-               "https://images.rawg.io", "https://cdn.rawg.io"],
+               "https://images.rawg.io", "https://cdn.rawg.io", "https://a.ltrbxd.com", "https://cdn.myanimelist.net", "https://myanimelist.net"],
       connectSrc: ["'self'"],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],
@@ -162,7 +177,7 @@ const adminOnly = (req, res, next) => {
 
 // ─── Input Helpers ────────────────────────────────────────────────────────────
 
-const VALID_TYPES    = new Set(['mixed', 'movie', 'series', 'game']);
+const VALID_TYPES    = new Set(['mixed', 'movie', 'series', 'game', 'media', 'anime']);
 const VALID_STATUSES = new Set(['want', 'watching', 'completed', 'dropped']);
 const VALID_MEDIA    = new Set(['movie', 'series', 'game']);
 const ALLOWED_IMG    = ['image.tmdb.org', 'media.rawg.io', 'images.rawg.io', 'cdn.rawg.io'];
@@ -257,12 +272,22 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     { id: user.id, username: user.username, is_admin: user.is_admin },
     JWT_SECRET, { expiresIn: '30d' }
   );
-  res.json({ token, user: { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin, avatar_color: user.avatar_color } });
+  res.json({ token, user: { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin, avatar_color: user.avatar_color, letterboxd_username: user.letterboxd_username || '', mal_username: user.mal_username || '', imdb_username: user.imdb_username || '' } });
 });
 
 app.get('/api/auth/me', auth, (req, res) => {
-  const user = db.prepare('SELECT id, username, email, is_admin, avatar_color FROM users WHERE id = ?').get(req.user.id);
+  const user = db.prepare('SELECT id, username, email, is_admin, avatar_color, letterboxd_username, mal_username, imdb_username FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+  res.json(user);
+});
+
+// Update profile (letterboxd username etc.)
+app.put('/api/auth/profile', auth, async (req, res) => {
+  const letterboxd_username = trim(req.body.letterboxd_username || '', 50);
+  const mal_username = trim(req.body.mal_username || '', 50);
+  const imdb_username = trim(req.body.imdb_username || '', 50);
+  db.prepare('UPDATE users SET letterboxd_username = ?, mal_username = ?, imdb_username = ? WHERE id = ?').run(letterboxd_username, mal_username, imdb_username, req.user.id);
+  const user = db.prepare('SELECT id, username, email, is_admin, avatar_color, letterboxd_username, mal_username, imdb_username FROM users WHERE id = ?').get(req.user.id);
   res.json(user);
 });
 
@@ -324,7 +349,7 @@ app.get('/api/lists', auth, (req, res) => {
       (SELECT poster_url FROM list_items WHERE list_id = l.id ORDER BY added_at DESC LIMIT 1) as latest_poster
     FROM lists l JOIN users u ON l.owner_id = u.id
     WHERE l.owner_id = ? OR l.id IN (SELECT list_id FROM list_shares WHERE user_id = ?)
-    ORDER BY l.updated_at DESC
+    ORDER BY l.category ASC, l.sort_order ASC, l.updated_at DESC
   `).all(req.user.id, req.user.id);
   res.json(lists);
 });
@@ -335,10 +360,11 @@ app.post('/api/lists', auth, (req, res) => {
   const description = trim(req.body.description, 500);
   const type = VALID_TYPES.has(req.body.type) ? req.body.type : 'mixed';
   const is_private = req.body.is_private !== false ? 1 : 0;
+  const category = trim(req.body.category || '', 50);
 
   const result = db.prepare(
-    'INSERT INTO lists (name, description, owner_id, is_private, type) VALUES (?, ?, ?, ?, ?)'
-  ).run(name, description, req.user.id, is_private, type);
+    'INSERT INTO lists (name, description, owner_id, is_private, type, category) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(name, description, req.user.id, is_private, type, category);
 
   res.json(db.prepare(`
     SELECT l.*, u.username as owner_name, 0 as item_count
@@ -361,7 +387,7 @@ app.get('/api/lists/:id', auth, (req, res) => {
   if (!isOwner && !shareEntry) return res.status(403).json({ error: 'Kein Zugriff' });
 
   const items = db.prepare(`
-    SELECT li.id, li.media_id, li.media_type, li.title, li.year, li.poster_url,
+    SELECT li.id, li.media_id, li.media_type, li.title, li.original_title, li.year, li.poster_url,
            li.backdrop_url, li.rating, li.genres, li.overview, li.status,
            li.user_rating, li.notes, li.added_at, u.username as added_by_name
     FROM list_items li LEFT JOIN users u ON li.added_by = u.id
@@ -388,9 +414,10 @@ app.put('/api/lists/:id', auth, (req, res) => {
   const description = req.body.description !== undefined ? trim(req.body.description, 500) : list.description;
   const type = VALID_TYPES.has(req.body.type) ? req.body.type : list.type;
   const is_private = req.body.is_private !== undefined ? (req.body.is_private ? 1 : 0) : list.is_private;
+  const category = req.body.category !== undefined ? trim(req.body.category, 50) : (list.category || '');
 
-  db.prepare(`UPDATE lists SET name=?, description=?, is_private=?, type=?, updated_at=datetime('now') WHERE id=?`)
-    .run(name, description, is_private, type, id);
+  db.prepare(`UPDATE lists SET name=?, description=?, is_private=?, category=?, type=?, updated_at=datetime('now') WHERE id=?`)
+    .run(name, description, is_private, category, type, id);
   res.json(db.prepare('SELECT * FROM lists WHERE id = ?').get(id));
 });
 
@@ -449,9 +476,23 @@ app.post('/api/lists/:id/items', auth, (req, res) => {
     db.prepare('SELECT 1 FROM list_shares WHERE list_id=? AND user_id=? AND can_edit=1').get(listId, req.user.id);
   if (!canEdit) return res.status(403).json({ error: 'Keine Bearbeitungsrechte' });
 
-  const { media_id, media_type } = req.body;
+  const { media_id, media_type, original_title } = req.body;
   if (!media_id || !VALID_MEDIA.has(media_type)) {
     return res.status(400).json({ error: 'media_id und gültiger media_type erforderlich' });
+  }
+
+  // Enforce list type restriction
+  const isGameList  = list.type === 'game';
+  const isMediaList = ['media', 'movie', 'series', 'mixed'].includes(list.type);
+  const isAnimeList = list.type === 'anime';
+  if (isGameList && media_type !== 'game') {
+    return res.status(400).json({ error: 'Diese Liste ist nur für Games' });
+  }
+  if (isAnimeList && media_type === 'game') {
+    return res.status(400).json({ error: 'Diese Liste ist nur für Anime' });
+  }
+  if (isMediaList && !isAnimeList && media_type === 'game') {
+    return res.status(400).json({ error: 'Diese Liste ist nur für Filme und Serien' });
   }
   const title = trim(req.body.title, 200);
   if (!title) return res.status(400).json({ error: 'Titel erforderlich' });
@@ -464,10 +505,11 @@ app.post('/api/lists/:id/items', auth, (req, res) => {
   }
 
   const result = db.prepare(`
-    INSERT INTO list_items (list_id, media_id, media_type, title, year, poster_url, backdrop_url, rating, genres, overview, status, added_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO list_items (list_id, media_id, media_type, title, original_title, year, poster_url, backdrop_url, rating, genres, overview, status, added_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     listId, mediaIdStr, media_type, title,
+    trim(original_title || title, 200),
     trim(req.body.year, 10),
     safeUrl(req.body.poster_url),
     safeUrl(req.body.backdrop_url),
@@ -499,7 +541,7 @@ app.put('/api/lists/:listId/items/:itemId', auth, (req, res) => {
   const notes = req.body.notes !== undefined ? trim(req.body.notes, 500) : item.notes;
   const ur = req.body.user_rating;
   const user_rating = ur !== undefined
-    ? (Number.isInteger(ur) && ur >= 1 && ur <= 5 ? ur : null)
+    ? (Number.isInteger(ur) && ur >= 1 && ur <= 10 ? ur : null)
     : item.user_rating;
 
   db.prepare('UPDATE list_items SET status=?, user_rating=?, notes=? WHERE id=?').run(status, user_rating, notes, itemId);
@@ -549,6 +591,7 @@ app.get('/api/metadata/search', auth, searchLimiter, async (req, res) => {
             id: `tmdb-${r.id}`,
             media_type: isTV ? 'series' : 'movie',
             title: trim(r.title || r.name, 200),
+            original_title: trim(r.original_title || r.original_name || r.title || r.name, 200),
             year: ((r.release_date || r.first_air_date || '').substring(0, 4)),
             poster_url: r.poster_path ? `https://image.tmdb.org/t/p/w300${r.poster_path}` : null,
             backdrop_url: r.backdrop_path ? `https://image.tmdb.org/t/p/w780${r.backdrop_path}` : null,
@@ -588,12 +631,182 @@ app.get('/api/metadata/search', auth, searchLimiter, async (req, res) => {
   }
 });
 
+// ─── Letterboxd RSS Proxy ─────────────────────────────────────────────────────
+app.get('/api/letterboxd/:username', auth, async (req, res) => {
+  const username = req.params.username.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!username) return res.status(400).json({ error: 'Ungültiger Username' });
+  try {
+    const rssRes = await fetch(`https://letterboxd.com/${username}/rss/`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/rss+xml, */*' }
+    });
+    if (!rssRes.ok) return res.status(502).json({ error: 'Feed nicht verfuegbar' });
+
+    const xml = await rssRes.text();
+    const parsed = [];
+
+    const rawItems = xml.split('<item>').slice(1);
+    for (const raw of rawItems) {
+      const block = raw.split('</item>')[0];
+      const titleMatch = block.match(/<title>([^<]+)<\/title>/);
+      const linkMatch  = block.match(/<link>([^<]+)<\/link>/);
+      const dateMatch  = block.match(/<pubDate>([^<]+)<\/pubDate>/);
+      // Extract TMDB movie ID from RSS if available
+      const tmdbMatch  = block.match(/<tmdb:movieId>([^<]+)<\/tmdb:movieId>/);
+      const yearMatch  = block.match(/<letterboxd:filmYear>([^<]+)<\/letterboxd:filmYear>/);
+      const filmTitle  = block.match(/<letterboxd:filmTitle>([^<]+)<\/letterboxd:filmTitle>/);
+
+      const title = titleMatch ? titleMatch[1].trim() : '';
+      if (!title) continue;
+
+      const ratingMatch = title.match(/[\u2605\u00bd]+$/u);
+      const cleanTitle  = title.replace(/\s*[-\u2013]\s*[\u2605\u00bd]*\s*$/u, '').trim();
+
+      let dateStr = '';
+      if (dateMatch) {
+        try { dateStr = new Date(dateMatch[1].trim()).toLocaleDateString('de-DE'); } catch {}
+      }
+
+      parsed.push({
+        title: cleanTitle,
+        filmTitle: filmTitle ? filmTitle[1].trim() : cleanTitle.replace(/,\s*\d{4}$/, '').trim(),
+        year: yearMatch ? yearMatch[1].trim() : '',
+        tmdbId: tmdbMatch ? tmdbMatch[1].trim() : null,
+        link:   linkMatch ? linkMatch[1].trim() : '',
+        date:   dateStr,
+        rating: ratingMatch ? ratingMatch[0] : '',
+      });
+      if (parsed.length >= 5) break;
+    }
+
+    // Fetch TMDB posters in parallel
+    const items = await Promise.all(parsed.map(async (item) => {
+      let poster = null;
+      if (TMDB_API_KEY) {
+        try {
+          let tmdbUrl;
+          if (item.tmdbId) {
+            tmdbUrl = `https://api.themoviedb.org/3/movie/${item.tmdbId}?api_key=${TMDB_API_KEY}`;
+          } else {
+            tmdbUrl = `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(item.filmTitle)}&year=${item.year}&language=en-US`;
+          }
+          const tmdbRes = await fetch(tmdbUrl, { signal: AbortSignal.timeout(4000) });
+          if (tmdbRes.ok) {
+            const data = await tmdbRes.json();
+            const posterPath = data.poster_path || data.results?.[0]?.poster_path;
+            if (posterPath) poster = `https://image.tmdb.org/t/p/w300${posterPath}`;
+          }
+        } catch {}
+      }
+      return { title: item.title, link: item.link, date: item.date, rating: item.rating, poster };
+    }));
+
+    res.json(items);
+  } catch (e) {
+    console.error('Letterboxd RSS error:', e.message);
+    res.status(500).json({ error: 'Feed konnte nicht geladen werden' });
+  }
+});
+
+
+// ─── MAL RSS Proxy ────────────────────────────────────────────────────────────
+// ─── MAL RSS Proxy ───────────────────────────────────────────────────────────
+app.get('/api/mal/:username', auth, async (req, res) => {
+  const username = req.params.username.replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!username) return res.status(400).json({ error: 'Ungültiger Username' });
+  try {
+    const rssRes = await fetch(`https://myanimelist.net/rss.php?type=rwe&u=${username}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/rss+xml, */*' }
+    });
+    if (!rssRes.ok) return res.status(502).json({ error: 'MAL Feed nicht verfuegbar' });
+
+    const xml = await rssRes.text();
+    const seen = new Set();
+    const parsed = [];
+
+    const rawItems = xml.split('<item>').slice(1);
+    for (const raw of rawItems) {
+      const block = raw.split('</item>')[0];
+      const titleMatch = block.match(/<title>([^<]+)<\/title>/);
+      const linkMatch  = block.match(/<link>([^<]+)<\/link>/);
+      const dateMatch  = block.match(/<pubDate>([^<]+)<\/pubDate>/);
+      const descMatch  = block.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/);
+
+      const title = titleMatch ? titleMatch[1].trim() : '';
+      const link  = linkMatch  ? linkMatch[1].trim()  : '';
+      if (!title || !link) continue;
+
+      // Deduplicate by link (same anime can appear multiple times)
+      if (seen.has(link)) continue;
+      seen.add(link);
+
+      // Extract MAL anime ID from URL: /anime/40839/...
+      const idMatch = link.match(/\/anime\/(\d+)\//);
+      const malId = idMatch ? idMatch[1] : null;
+
+      let dateStr = '';
+      if (dateMatch) {
+        try { dateStr = new Date(dateMatch[1].trim()).toLocaleDateString('de-DE'); } catch {}
+      }
+
+      const status = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+      parsed.push({ title, link, dateStr, malId, status });
+      if (parsed.length >= 5) break;
+    }
+
+    // Fetch posters sequentially with 400ms delay to respect Jikan rate limit (3 req/sec)
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const items = [];
+    for (const item of parsed) {
+      let poster = null;
+      if (item.malId) {
+        try {
+          const jRes = await fetch(`https://api.jikan.moe/v4/anime/${item.malId}`,
+            { signal: AbortSignal.timeout(4000), headers: { 'Accept': 'application/json' } }
+          );
+          if (jRes.ok) {
+            const jData = await jRes.json();
+            poster = jData.data?.images?.jpg?.large_image_url || jData.data?.images?.jpg?.image_url || null;
+          }
+        } catch {}
+        await sleep(500);
+      }
+      items.push({ title: item.title, link: item.link, date: item.dateStr, score: '', poster });
+    }
+
+    res.json(items);
+  } catch (e) {
+    console.error('MAL RSS error:', e.message);
+    res.status(500).json({ error: 'Feed konnte nicht geladen werden' });
+  }
+});
+
+
+// ─── List Reorder ─────────────────────────────────────────────────────────────
+app.put('/api/lists/reorder', auth, (req, res) => {
+  const { order } = req.body; // array of { id, sort_order }
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order muss ein Array sein' });
+  const update = db.prepare('UPDATE lists SET sort_order = ? WHERE id = ? AND owner_id = ?');
+  const updateMany = db.transaction((items) => {
+    for (const item of items) {
+      if (Number.isFinite(item.id) && Number.isFinite(item.sort_order)) {
+        update.run(item.sort_order, item.id, req.user.id);
+      }
+    }
+  });
+  updateMany(order);
+  res.json({ success: true });
+});
+
 // ─── SPA Fallback ─────────────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
+// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message);
   res.status(500).json({ error: 'Interner Serverfehler' });

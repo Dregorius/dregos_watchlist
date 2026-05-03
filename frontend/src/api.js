@@ -23,6 +23,7 @@ export const api = {
   // Auth
   login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
   register: (data) => request('/auth/register', { method: 'POST', body: data }),
+  updateProfile: (data) => request('/auth/profile', { method: 'PUT', body: data }),
 
   // Invites
   getInvites: () => request('/invites'),
@@ -41,6 +42,7 @@ export const api = {
   deleteList: (id) => request(`/lists/${id}`, { method: 'DELETE' }),
   shareList: (id, userId, canEdit) => request(`/lists/${id}/share`, { method: 'POST', body: { user_id: userId, can_edit: canEdit } }),
   unshareList: (id, userId) => request(`/lists/${id}/share/${userId}`, { method: 'DELETE' }),
+  reorderLists: (order) => request('/lists/reorder', { method: 'PUT', body: { order } }),
 
   // Items
   addItem: (listId, data) => request(`/lists/${listId}/items`, { method: 'POST', body: data }),
@@ -49,4 +51,10 @@ export const api = {
 
   // Metadata
   search: (q, type) => request(`/metadata/search?q=${encodeURIComponent(q)}${type ? `&type=${type}` : ''}`),
+
+  // Letterboxd
+  getLetterboxdFeed: (username) => request(`/letterboxd/${encodeURIComponent(username)}`),
+
+  // MAL
+  getMalFeed: (username) => request(`/mal/${encodeURIComponent(username)}`),
 };

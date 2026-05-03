@@ -5,11 +5,25 @@ import { useAuth } from '../AuthContext';
 import MediaCard from '../components/MediaCard';
 import SearchModal from '../components/SearchModal';
 
-const STATUS_FILTERS = [
+const STATUS_FILTERS_MEDIA = [
   { value: '', label: 'Alle' },
   { value: 'want', label: '📌 Merkliste' },
   { value: 'watching', label: '▶️ Schaue ich' },
   { value: 'completed', label: '✅ Gesehen' },
+  { value: 'dropped', label: '❌ Abgebrochen' },
+];
+const STATUS_FILTERS_ANIME = [
+  { value: '', label: 'Alle' },
+  { value: 'want', label: '📌 Merkliste' },
+  { value: 'watching', label: '▶️ Schaue ich' },
+  { value: 'completed', label: '✅ Gesehen' },
+  { value: 'dropped', label: '❌ Abgebrochen' },
+];
+const STATUS_FILTERS_GAME = [
+  { value: '', label: 'Alle' },
+  { value: 'want', label: '📌 Merkliste' },
+  { value: 'watching', label: '🎮 Spiele ich' },
+  { value: 'completed', label: '✅ Durchgespielt' },
   { value: 'dropped', label: '❌ Abgebrochen' },
 ];
 const TYPE_FILTERS = [
@@ -18,22 +32,36 @@ const TYPE_FILTERS = [
   { value: 'series', label: '📺 Serien' },
   { value: 'game', label: '🎮 Games' },
 ];
-const TYPE_LABELS = { movie: 'Filme', series: 'Serien', game: 'Games', mixed: 'Gemischt' };
-const STATUS_LABELS = { want: 'Merkliste', watching: 'Schaue ich', completed: 'Gesehen', dropped: 'Abgebrochen' };
-const DB_LABEL = { movie: 'TMDB', series: 'TMDB', game: 'RAWG' };
+const TYPE_LABELS = { media: 'Filme & Serien', movie: 'Filme & Serien', series: 'Filme & Serien', game: 'Games', anime: 'Anime', mixed: 'Filme & Serien' };
+const STATUS_LABELS = {
+  movie:  { want: 'Merkliste', watching: 'Schaue ich', completed: 'Gesehen',       dropped: 'Abgebrochen' },
+  series: { want: 'Merkliste', watching: 'Schaue ich', completed: 'Gesehen',       dropped: 'Abgebrochen' },
+  game:   { want: 'Merkliste', watching: 'Spiele ich', completed: 'Durchgespielt', dropped: 'Abgebrochen' },
+};
+const getStatusLabel = (type, status) => (STATUS_LABELS[type] || STATUS_LABELS.movie)[status] || status;
+const DB_LABEL = { movie: 'Letterboxd', series: 'TMDB', game: 'RAWG', anime: 'MAL' };
 
-function getExternalUrl(mediaId, mediaType) {
-  if (!mediaId) return null;
-  const rawId = String(mediaId).replace(/^tmdb-/, '').replace(/^rawg-/, '');
-  if (mediaType === 'movie')  return `https://www.themoviedb.org/movie/${rawId}`;
-  if (mediaType === 'series') return `https://www.themoviedb.org/tv/${rawId}`;
-  if (mediaType === 'game')   return `https://rawg.io/games/${rawId}`;
-  return null;
+function toLetterboxdSlug(title) {
+  return title
+    .toLowerCase()
+    .replace(/['']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function getExternalUrl(item, listType) {
+  if (!item) return null;
+  const rawId = String(item.media_id).replace(/^tmdb-/, '').replace(/^rawg-/, '');
+  if (item.media_type === 'game') return `https://rawg.io/games/${rawId}`;
+  if (listType === 'anime') return `https://myanimelist.net/search/all?q=${encodeURIComponent(item.title)}`;
+  if (item.media_type === 'series') return `https://www.themoviedb.org/tv/${rawId}`;
+  const query = [item.original_title || item.title, item.year].filter(Boolean).join(' ');
+  return `https://letterboxd.com/search/${encodeURIComponent(query)}/`;
 }
 
 // ── Random Picker Modal ────────────────────────────────────────────────────────
 
-function RandomPickerModal({ items, onClose }) {
+function RandomPickerModal({ items, listType, onClose }) {
   const [picked, setPicked] = useState(null);
   const [spinning, setSpinning] = useState(false);
 
@@ -56,8 +84,8 @@ function RandomPickerModal({ items, onClose }) {
 
   useEffect(() => { pick(); }, []);
 
-  const externalUrl = picked ? getExternalUrl(picked.media_id, picked.media_type) : null;
-  const dbLabel = picked ? (DB_LABEL[picked.media_type] || 'TMDB') : '';
+  const externalUrl = picked ? getExternalUrl(picked, listType) : null;
+  const dbLabel = picked ? (listType === 'anime' ? 'MAL' : DB_LABEL[picked.media_type] || 'TMDB') : '';
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -123,7 +151,7 @@ function RandomPickerModal({ items, onClose }) {
                     fontSize: 11, padding: '2px 8px', borderRadius: 4,
                     background: 'rgba(255,255,255,.08)', color: 'var(--text2)',
                   }}>
-                    {STATUS_LABELS[picked.status]}
+                    {getStatusLabel(picked.media_type, picked.status)}
                   </span>
                   {picked.added_by_name && (
                     <span style={{ fontSize: 11, color: 'var(--text3)' }}>
@@ -241,7 +269,7 @@ function ShareModal({ list, onClose, onUpdated }) {
                       {s.username?.[0]?.toUpperCase()}
                     </div>
                     <span className="share-item-name">{s.username}</span>
-                    <span className="share-item-role">{s.can_edit ? '✏️ Bearbeiter' : '👁 Leser'}</span>
+                    <span className="share-item-role">{s.can_edit ? 'Bearbeiter' : '👁 Leser'}</span>
                     <button className="btn btn-ghost btn-sm" onClick={() => handleUnshare(s.user_id)}>Entfernen</button>
                   </div>
                 ))}
@@ -257,7 +285,7 @@ function ShareModal({ list, onClose, onUpdated }) {
 // ── Edit Modal ────────────────────────────────────────────────────────────────
 
 function EditListModal({ list, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: list.name, description: list.description, is_private: !!list.is_private, type: list.type });
+  const [form, setForm] = useState({ name: list.name, description: list.description, category: list.category || '', is_private: !!list.is_private, type: list.type });
   const [loading, setLoading] = useState(false);
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -297,10 +325,13 @@ function EditListModal({ list, onClose, onSaved }) {
             </div>
             <div className="form-group">
               <label className="form-label">Kategorie</label>
+              <input value={form.category} onChange={set('category')} placeholder="z.B. Mit Freunden, 2024, Horror..." />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Inhalt</label>
               <select value={form.type} onChange={set('type')}>
-                <option value="mixed">🎭 Gemischt</option>
-                <option value="movie">🎬 Filme</option>
-                <option value="series">📺 Serien</option>
+                <option value="media">🎬 Filme &amp; Serien</option>
+                <option value="anime">🍥 Anime</option>
                 <option value="game">🎮 Games</option>
               </select>
             </div>
@@ -308,7 +339,7 @@ function EditListModal({ list, onClose, onSaved }) {
               <label className="form-label">Sichtbarkeit</label>
               <select value={form.is_private ? 'private' : 'shared'} onChange={e => setForm(f => ({ ...f, is_private: e.target.value === 'private' }))}>
                 <option value="private">🔒 Privat</option>
-                <option value="shared">👥 Geteilt</option>
+                <option value="shared">Geteilt</option>
               </select>
             </div>
           </div>
@@ -376,7 +407,7 @@ export default function ListDetail() {
         )}
         <div className="list-hero-content">
           <div className="list-hero-type">
-            {TYPE_LABELS[list.type] || 'Liste'} · {list.is_private ? '🔒 Privat' : '👥 Geteilt'}
+            {TYPE_LABELS[list.type] || 'Liste'} · {list.is_private ? '🔒 Privat' : 'Geteilt'}
           </div>
           <h1 className="list-hero-title">{list.name}</h1>
           {list.description && <p className="list-hero-desc">{list.description}</p>}
@@ -398,10 +429,10 @@ export default function ListDetail() {
               {isOwner && (
                 <>
                   <button className="btn btn-secondary btn-sm" onClick={() => setShowShare(true)}>
-                    👥 Teilen
+                    Teilen
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setShowEdit(true)}>
-                    ✏️
+                    Edit
                   </button>
                 </>
               )}
@@ -414,7 +445,7 @@ export default function ListDetail() {
       <div className="container">
         {/* Filters */}
         <div className="filter-bar">
-          {STATUS_FILTERS.map(f => (
+          {(list.type === 'game' ? STATUS_FILTERS_GAME : list.type === 'anime' ? STATUS_FILTERS_ANIME : STATUS_FILTERS_MEDIA).map(f => (
             <button
               key={f.value}
               className={`filter-chip ${statusFilter === f.value ? 'active' : ''}`}
@@ -422,7 +453,14 @@ export default function ListDetail() {
             >{f.label}</button>
           ))}
           <div style={{ width: 1, background: 'var(--border)', height: 24, margin: '0 4px' }} />
-          {TYPE_FILTERS.map(f => (
+          {(list.type === 'game'
+            ? TYPE_FILTERS.filter(f => f.value === '' || f.value === 'game')
+            : list.type === 'anime'
+            ? TYPE_FILTERS.filter(f => f.value === '' || f.value === 'series')
+            : list.type === 'media' || list.type === 'movie' || list.type === 'series' || list.type === 'mixed'
+            ? TYPE_FILTERS.filter(f => f.value !== 'game')
+            : TYPE_FILTERS
+          ).map(f => (
             <button
               key={f.value}
               className={`filter-chip ${typeFilter === f.value ? 'active' : ''}`}
@@ -465,6 +503,7 @@ export default function ListDetail() {
                 key={item.id}
                 item={item}
                 listId={list.id}
+                listType={list.type}
                 canEdit={list.can_edit}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
@@ -477,11 +516,12 @@ export default function ListDetail() {
       {showPicker && (
         <RandomPickerModal
           items={filtered.length > 0 ? filtered : items}
+          listType={list.type}
           onClose={() => setShowPicker(false)}
         />
       )}
       {showSearch && (
-        <SearchModal listId={list.id} onAdd={handleAdd} onClose={() => setShowSearch(false)} />
+        <SearchModal listId={list.id} listType={list.type} onAdd={handleAdd} onClose={() => setShowSearch(false)} />
       )}
       {showShare && (
         <ShareModal list={list} onClose={() => setShowShare(false)} onUpdated={setList} />
