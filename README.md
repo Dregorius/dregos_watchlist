@@ -1,38 +1,36 @@
-# Drego`s Watchlist
+# Drego's Watchlist
 
-Private selfhosted watchlist app for movies, series and games.
-Use solo or share between friends.
+Private self-hosted watchlist app for movies, series, anime and games.
+Use solo or share lists between friends.
 
 ## Features
 
-- Invite-only registration (accounts require an invitation code)
+- Invite-only registration — accounts require an invitation code, no public sign-up
 - Movie and series metadata via TMDB API (free)
 - Game metadata via RAWG API (free, optional)
-- Private and shared lists
-- Personal ratings and status tracking
+- Anime support with MyAnimeList integration
+- Private and shared lists with configurable edit permissions
+- Custom categories for organizing lists, with drag and drop reordering
+- Personal star ratings (1-10) and watch status per entry
+- Random picker — picks a random entry based on active filters
+- Direct links to Letterboxd, TMDB, MAL or RAWG per entry
+- Letterboxd recently watched widget on the dashboard (with posters)
+- MyAnimeList recently watched widget on the dashboard
+- IMDb profile and watchlist link widget
+- Admin panel with invite management and member overview
+- Dark, responsive UI
 
 ## Requirements
 
 - Docker and Docker Compose
-- nginx with certbot on server (if hosted on public server)
 - TMDB API key: https://www.themoviedb.org/settings/api
-- RAWG API key (optional): https://rawg.io/apidocs
+- RAWG API key (optional, for game search): https://rawg.io/apidocs
 
 ## Setup
 
-### 1. Copy the project to the server
+### 1. Configure environment variables
 
 ```bash
-scp watchlist-app.zip <user>@<server>:~/
-ssh <user>@<server>
-cd ~/webserver
-unzip ~/watchlist-app.zip
-```
-
-### 2. Configure environment variables
-
-```bash
-cd ~/webserver/watchlist-app
 cp .env.example .env
 nano .env
 ```
@@ -46,6 +44,17 @@ NODE_ENV=production
 PORT=3000
 ```
 
+### 2. Configure the database volume
+
+In `docker-compose.yml`, set the volume to a path outside the container:
+
+```yaml
+volumes:
+  - /your/path/to/data:/app/data
+```
+
+This ensures your database survives container rebuilds and updates.
+
 ### 3. Start the app
 
 ```bash
@@ -58,80 +67,65 @@ The first build takes about 2-3 minutes. Verify it is running:
 curl http://127.0.0.1:3000/api/health
 ```
 
-### 4. Obtain SSL certificate
+### 4. Create the first account
+
+Open in browser: http://localhost:3000/register
+
+Invitation code: **SETUP-ADMIN**
+
+The first registered user automatically receives admin rights and can create further invitation codes in the admin panel.
+
+## Updating
 
 ```bash
-sudo certbot certonly \
-  --dns-cloudflare \
-  --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-  -d watchlist.<your-domain>
-```
-
-### 5. Configure nginx
-
-```bash
-sudo cp nginx-subdomain.conf /etc/nginx/sites-available/watchlist
-sudo ln -s /etc/nginx/sites-available/watchlist /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-### 6. Create the first account
-
-Open in browser: https://watchlist.<your-domain>/register
-
-Invitation code: SETUP-ADMIN
-
-The first registered user automatically receives admin rights and can
-create further invitation codes in the admin panel.
-
-## Administration
-
-### Creating invitations
-
-In the admin panel, click "Einladung erstellen". Copy the generated code
-and send it to the person you want to invite.
-
-### Updating the app
-
-```bash
-cd ~/webserver/watchlist-app
-unzip -o ~/update-patch.zip -d ~/webserver/
+unzip -o update-patch.zip -d ./
 docker compose up -d --build
 ```
 
-### Backing up the database
+## Backing up
 
 ```bash
-cp ~/webserver/watchlist/watchlist.db \
-   ~/backups/watchlist-$(date +%Y%m%d).db
+cp /your/path/to/data/watchlist.db ./watchlist-$(date +%Y%m%d).db
 ```
 
-### Stopping the app
+## Usage
 
-```bash
-docker compose down
-```
+### Lists
 
-## Local Development
+Create lists from the dashboard. Each list has a type (Movies & Series, Anime, or Games) which restricts what can be added and shows the appropriate external links.
 
-```bash
-# Backend
-cd backend && npm install && node server.js
+Set a category when creating a list to group related lists together on the dashboard. Categories can be renamed inline by clicking the category name.
 
-# Frontend (separate terminal)
-cd frontend && npm install && npm run dev
-```
+Lists can be private (only you) or shared with specific users. Shared users can be granted read-only or edit access.
 
-Frontend runs on http://localhost:5173, backend on http://localhost:3000.
+### Adding content
 
-## Database
+Inside a list, click "+ Hinzufügen" to search for movies, series, anime or games. Search results pull metadata from TMDB and RAWG automatically.
 
-The SQLite database is stored outside the container at:
+Each entry tracks:
+- Status: Watchlist / Watching / Completed / Dropped (or game equivalents)
+- Personal star rating (1-10)
+- External link: Letterboxd (movies), TMDB (series), MAL (anime), RAWG (games)
 
-    ~/webserver/watchlist/watchlist.db
+### Random picker
 
-This directory is mounted as a Docker volume, so all data persists across
-container restarts and app updates.
+Inside a list, click the dice button to randomly pick an entry. The picker respects the currently active status and type filters.
+
+### Dashboard widgets
+
+Link your external profiles in the navbar under your username, then click "Profil bearbeiten":
+
+- **Letterboxd** — shows your recently logged films with posters
+- **MyAnimeList** — shows your recently watched anime with posters
+- **IMDb** — links to your IMDb profile and watchlist
+
+Widgets appear on the right side of the dashboard on wide screens and below the lists on narrow screens.
+
+### Admin panel
+
+Accessible via the navbar if you have admin rights. From here you can:
+- Create and delete invitation codes
+- See all registered members with their stats
 
 ## Troubleshooting
 
@@ -140,10 +134,11 @@ Container does not start:
 docker compose logs watchlist
 ```
 
-Port 3000 already in use: change the port mapping in docker-compose.yml to
-127.0.0.1:3001:3000 and update proxy_pass in nginx-subdomain.conf accordingly.
+TMDB search returns nothing: check TMDB_API_KEY in .env, then run:
+```bash
+docker compose restart
+```
 
-TMDB search returns nothing: check TMDB_API_KEY in .env, then restart the
-container with "docker compose restart".
+MAL widget shows no posters: Jikan (the MAL API) has a rate limit of 3 requests per second. The widget fetches posters one by one with a 500ms delay for up to 3 entries, so loading takes a couple of seconds.
 
-Cloudflare: set the SSL mode in the Cloudflare dashboard to "Full (strict)".
+Letterboxd widget shows no posters: your TMDB API key is used to fetch posters for Letterboxd entries. Check that TMDB_API_KEY is set correctly.

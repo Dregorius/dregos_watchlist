@@ -676,7 +676,7 @@ app.get('/api/letterboxd/:username', auth, async (req, res) => {
         date:   dateStr,
         rating: ratingMatch ? ratingMatch[0] : '',
       });
-      if (parsed.length >= 5) break;
+      if (parsed.length >= 3) break;
     }
 
     // Fetch TMDB posters in parallel
@@ -753,7 +753,7 @@ app.get('/api/mal/:username', auth, async (req, res) => {
       const status = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
       parsed.push({ title, link, dateStr, malId, status });
-      if (parsed.length >= 5) break;
+      if (parsed.length >= 3) break;
     }
 
     // Fetch posters sequentially with 400ms delay to respect Jikan rate limit (3 req/sec)
