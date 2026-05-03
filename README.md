@@ -5,17 +5,17 @@ Use solo or share lists between friends.
 
 ## Features
 
-- Invite-only registration — accounts require an invitation code, no public sign-up
+- Invite-only registration (accounts require an invitation code, no public sign-up)
 - Movie and series metadata via TMDB API (free)
 - Game metadata via RAWG API (free, optional)
 - Anime support with MyAnimeList integration
 - Private and shared lists with configurable edit permissions
 - Custom categories for organizing lists, with drag and drop reordering
 - Personal star ratings (1-10) and watch status per entry
-- Random picker — picks a random entry based on active filters
+- Random picker that respects active filters
 - Direct links to Letterboxd, TMDB, MAL or RAWG per entry
 - Letterboxd recently watched widget on the dashboard (with posters)
-- MyAnimeList recently watched widget on the dashboard
+- MyAnimeList recently watched widget on the dashboard (last 3 entries)
 - IMDb profile and watchlist link widget
 - Admin panel with invite management and member overview
 - Dark, responsive UI
@@ -71,9 +71,10 @@ curl http://127.0.0.1:3000/api/health
 
 Open in browser: http://localhost:3000/register
 
-Invitation code: **SETUP-ADMIN**
+Invitation code: SETUP-ADMIN
 
-The first registered user automatically receives admin rights and can create further invitation codes in the admin panel.
+The first registered user automatically receives admin rights and can create
+further invitation codes in the admin panel.
 
 ## Updating
 
@@ -92,15 +93,20 @@ cp /your/path/to/data/watchlist.db ./watchlist-$(date +%Y%m%d).db
 
 ### Lists
 
-Create lists from the dashboard. Each list has a type (Movies & Series, Anime, or Games) which restricts what can be added and shows the appropriate external links.
+Create lists from the dashboard. Each list has a type (Movies & Series, Anime,
+or Games) which restricts what can be added and shows the appropriate external
+links per entry.
 
-Set a category when creating a list to group related lists together on the dashboard. Categories can be renamed inline by clicking the category name.
+Set a category when creating a list to group related lists on the dashboard.
+Category names can be edited inline by clicking the category heading.
 
-Lists can be private (only you) or shared with specific users. Shared users can be granted read-only or edit access.
+Lists can be private (visible only to you) or shared with specific users.
+Shared users can be given read-only or edit access.
 
 ### Adding content
 
-Inside a list, click "+ Hinzufügen" to search for movies, series, anime or games. Search results pull metadata from TMDB and RAWG automatically.
+Inside a list, click "+ Hinzufügen" to search for movies, series, anime or
+games. Results pull metadata from TMDB and RAWG automatically.
 
 Each entry tracks:
 - Status: Watchlist / Watching / Completed / Dropped (or game equivalents)
@@ -109,23 +115,25 @@ Each entry tracks:
 
 ### Random picker
 
-Inside a list, click the dice button to randomly pick an entry. The picker respects the currently active status and type filters.
+Inside a list, click the dice button to pick a random entry. The picker
+respects the currently active status and type filters.
 
 ### Dashboard widgets
 
-Link your external profiles in the navbar under your username, then click "Profil bearbeiten":
+Link your external profiles via the navbar: click your username, then
+"Profil bearbeiten".
 
-- **Letterboxd** — shows your recently logged films with posters
-- **MyAnimeList** — shows your recently watched anime with posters
-- **IMDb** — links to your IMDb profile and watchlist
+- Letterboxd: shows your recently logged films with posters
+- MyAnimeList: shows your last 3 recently watched anime with posters
+- IMDb: links to your IMDb profile and watchlist
 
-Widgets appear on the right side of the dashboard on wide screens and below the lists on narrow screens.
+Widgets appear on the right side of the dashboard on wide screens and
+below the lists on narrow screens.
 
 ### Admin panel
 
-Accessible via the navbar if you have admin rights. From here you can:
-- Create and delete invitation codes
-- See all registered members with their stats
+Accessible via the navbar if you have admin rights. From here you can create
+and delete invitation codes, and see all registered members with their stats.
 
 ## Troubleshooting
 
@@ -139,6 +147,9 @@ TMDB search returns nothing: check TMDB_API_KEY in .env, then run:
 docker compose restart
 ```
 
-MAL widget shows no posters: Jikan (the MAL API) has a rate limit of 3 requests per second. The widget fetches posters one by one with a 500ms delay for up to 3 entries, so loading takes a couple of seconds.
+MAL widget shows no posters: Jikan (the MAL API) rate limits requests to
+3 per second. The widget fetches posters one by one with a 500ms delay,
+so loading takes a couple of seconds.
 
-Letterboxd widget shows no posters: your TMDB API key is used to fetch posters for Letterboxd entries. Check that TMDB_API_KEY is set correctly.
+Letterboxd widget shows no posters: the TMDB API key is used to fetch
+posters for Letterboxd entries. Check that TMDB_API_KEY is set correctly.
