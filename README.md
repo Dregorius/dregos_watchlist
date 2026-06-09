@@ -5,6 +5,8 @@ Use solo or share lists between friends.
 
 <img width="2738" height="1303" alt="image" src="https://github.com/user-attachments/assets/e70cc556-73d3-4616-9ab0-b147ac963e36" />
 
+<img width="2948" height="1266" alt="image" src="https://github.com/user-attachments/assets/9a11a19d-120b-4d99-b9da-6fc29ac894a8" />
+
 
 ## Features
 
