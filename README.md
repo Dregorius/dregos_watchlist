@@ -3,9 +3,7 @@
 Private self-hosted watchlist app for movies, series, anime and games.
 Use solo or share lists between friends.
 
-<img width="2525" height="1253" alt="image" src="https://github.com/user-attachments/assets/d79a7f93-7ed7-4083-99bf-b0e1ee72bc85" />
-
-<img width="184" height="331" alt="image" src="https://github.com/user-attachments/assets/3473fb7c-b005-43b7-aa51-07812e107775" />
+<img width="2738" height="1303" alt="image" src="https://github.com/user-attachments/assets/e70cc556-73d3-4616-9ab0-b147ac963e36" />
 
 
 ## Features
