@@ -1,5 +1,7 @@
 # Drego's Watchlist
 
+<img width="2525" height="1253" alt="image" src="https://github.com/user-attachments/assets/d79a7f93-7ed7-4083-99bf-b0e1ee72bc85" />
+
 Private self-hosted watchlist app for movies, series, anime and games.
 Use solo or share lists between friends.
 
